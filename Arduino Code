@@ -1,0 +1,179 @@
+#include <ESP8266WiFi.h>
+#include <Wire.h>
+#include <Adafruit_SH110X.h>
+#include <Keypad.h>
+
+// OLED
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Keypad
+const byte ROWS = 4;
+const byte COLS = 4;
+char keys[ROWS][COLS] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+byte rowPins[ROWS] = {5, 4, 0, 2};
+byte colPins[COLS] = {14, 12, 13, 15};
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+// Relay
+const int relayPin = 16;
+
+// State machine
+enum LockerState { SET_NEW_PASS, LOCKED, UNLOCKED };
+LockerState state = SET_NEW_PASS;
+
+String passcode = "";
+String inputBuffer = "";
+
+// Display timeout
+unsigned long displayStart = 0;
+const unsigned long displayDuration = 10000;
+
+void setup() {
+  Serial.begin(115200);
+
+  // I2C setup
+  Wire.begin(4, 5); // SDA = GPIO4, SCL = GPIO5 for ESP8266
+
+  // Initialize OLED
+  if (!display.begin(0x3C, true)) { // SH1106 default address = 0x3C
+    Serial.println(F("OLED init failed"));
+    while (true);
+  }
+
+  display.clearDisplay();
+  display.setTextColor(SH110X_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print("Smart Lock");
+  display.display();
+  delay(1500);
+
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, HIGH); // Start locked
+
+  promptSetPassword();
+}
+
+void loop() {
+  char key = keypad.getKey();
+
+  if (key) {
+    if (key == '*') {
+      if (inputBuffer.length() > 0) {
+        inputBuffer.remove(inputBuffer.length() - 1);
+        updateDisplayBuffer();
+      }
+    } else if (isdigit(key)) {
+      if (inputBuffer.length() < 8) {
+        inputBuffer += key;
+        updateDisplayBuffer();
+      }
+    } else if (key == '#') {
+      handleConfirmKey();
+    }
+  }
+
+  // Clear screen after timeout
+  if (displayStart != 0 && millis() - displayStart >= displayDuration) {
+    displayStart = 0;
+    clearDisplay();
+  }
+}
+
+void handleConfirmKey() {
+  if (state == SET_NEW_PASS) {
+    if (inputBuffer.length() >= 4) {
+      passcode = inputBuffer;
+      inputBuffer = "";
+      lockLocker();
+      state = LOCKED;
+    } else {
+      showMessage("Too Short", 1000);
+      inputBuffer = "";
+      promptSetPassword();
+    }
+  } else if (state == LOCKED) {
+    if (inputBuffer == passcode) {
+      inputBuffer = "";
+      unlockLocker();
+      state = UNLOCKED;
+    } else {
+      showMessage("Incorrect", 1000);
+      inputBuffer = "";
+    }
+  } else if (state == UNLOCKED) {
+    inputBuffer = "";
+    passcode = "";
+    state = SET_NEW_PASS;
+    promptSetPassword();
+  }
+}
+
+void promptSetPassword() {
+  display.clearDisplay();
+  display.setTextColor(SH110X_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print("Set Pass:");
+  display.display();
+}
+
+void updateDisplayBuffer() {
+  display.clearDisplay();
+  display.setTextColor(SH110X_WHITE);
+  display.setTextSize(2);
+  if (state == SET_NEW_PASS) {
+    display.setCursor(0, 0);
+    display.print("New Pass:");
+  } else if (state == LOCKED) {
+    display.setCursor(0, 0);
+    display.print("Enter:");
+  }
+  display.setCursor(0, 32);
+  display.print(inputBuffer);
+  display.display();
+  displayStart = millis();
+}
+
+void lockLocker() {
+  digitalWrite(relayPin, HIGH);
+  showMessage("Locked", 1500);
+}
+
+void unlockLocker() {
+  digitalWrite(relayPin, LOW);
+  showMessage("Unlocked", 1500);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0, 0);
+  display.print("Press # to set");
+  display.setCursor(0, 10);
+  display.print("new password");
+  display.display();
+}
+
+void showMessage(String msg, int delayMs) {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0, 0);
+  display.print(msg);
+  display.display();
+  delay(delayMs);
+  display.clearDisplay();
+  display.display();
+}
+
+void clearDisplay() {
+  display.clearDisplay();
+  display.display();
+}
