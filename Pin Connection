@@ -1,0 +1,10 @@
+Pin Connections:
+OLED Display:
+SDA: Connected to NodeMCU's D2 (GPIO4)
+SCL: Connected to NodeMCU's D1 (GPIO5)
+Note: These are common connections, but you might need to adjust them based on your specific OLED display and wiring.
+LED:
+
+Relay (16): Connected to NodeMCU's D0 (GPIO16)
+
+keypad pin: D1,D2,D3,D4 - Row D5,D6,D7,D8 - column
